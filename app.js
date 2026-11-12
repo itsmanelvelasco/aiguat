@@ -57,7 +57,7 @@ map.on('load', () => {
   map.addLayer({ id: 'hill', type: 'hillshade', source: 'dem-hs', paint: { 'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#0a1020' } });
   for (const o of OFFICIAL) {
     map.addSource(o.id, { type: 'raster', tileSize: 256, tiles: [`${WMS}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=${o.id}&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true`], attribution: 'SNCZI · IDEE' });
-    map.addLayer({ id: o.id, type: 'raster', source: o.id, layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.75 } });
+    map.addLayer({ id: o.id, type: 'raster', source: o.id, layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.7, 'raster-hue-rotate': 160, 'raster-saturation': 0.4 } });
   }
   map.addSource('bbox', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'bbox-glow', type: 'line', source: 'bbox', paint: { 'line-color': '#38bdf8', 'line-width': 8, 'line-blur': 6, 'line-opacity': 0.5 } });
