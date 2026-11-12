@@ -55,6 +55,43 @@
   </section>
 
   <section>
+    <h3>Hyper-local alerts <span class="muted">250 m blocks · streets · buildings</span></h3>
+    <div class="row addr"><input id="addr" placeholder="Your address, e.g. Carrer Major 10, Tortosa" /><button id="addrGo" class="ghost sm">Check</button></div>
+    <div id="addrRes"></div>
+    <div class="stats">
+      <div><b id="bRed" style="color:#f87171">–</b><span>red blocks</span></div>
+      <div><b id="bOr" style="color:#fb923c">–</b><span>orange</span></div>
+      <div><b id="bYe" style="color:#fde047">–</b><span>yellow</span></div>
+      <div><b id="bBld">–</b><span>buildings hit (view)</span></div>
+    </div>
+    <div class="cap">Streets at risk in view · click to zoom & draft an alert</div>
+    <div id="streetList" class="list"></div>
+  </section>
+
+  <section id="comms">
+    <h3>Alert dispatch <span class="muted">simulated · nothing is sent</span></h3>
+    <div class="seg" id="langTabs"><button data-l="ca" class="on">Català</button><button data-l="es">Español</button><button data-l="en">English</button></div>
+    <div id="draftBox"><div class="cap">Pick a street, block, address or map point to draft a targeted alert.</div></div>
+    <div class="chips toggles" id="channels">
+      <label><input type="checkbox" value="ES-Alert" checked /> ES-Alert (cell broadcast)</label>
+      <label><input type="checkbox" value="SMS" checked /> SMS</label>
+      <label><input type="checkbox" value="Push" checked /> App push</label>
+      <label><input type="checkbox" value="Sirens/PA" /> Sirens · PA</label>
+    </div>
+    <button id="send" class="primary danger" disabled>Send alert (simulated)</button>
+    <div id="log" class="list"></div>
+  </section>
+
+  <section>
+    <h3>ACA · live water network</h3>
+    <div class="cap" id="acaNote">Loading ACA open data…</div>
+    <div class="cap" style="margin-top:8px">Reservoirs (fill %) · click to fly</div>
+    <div id="resList" class="list"></div>
+    <div class="cap" style="margin-top:8px">Rivers above normal today</div>
+    <div id="gaugeList" class="list"></div>
+  </section>
+
+  <section>
     <h3>Validation · official SNCZI 100-yr zone</h3>
     <div class="stats two">
       <div><b id="vIoU">–</b><span>IoU (overlap)</span></div>
@@ -96,7 +133,7 @@
   <div class="ticks"><span>0</span><span>1.5</span><span>3</span><span>4.5</span><span>6+ m</span></div>
   <div class="off"><i></i>Official zone (when on)</div>
 </div>
-<div id="hint">Click the map to analyse any area</div>
+<div id="hint">Click outside the box to analyse a new area · inside to probe water depth · zoom in for streets & buildings</div>
 
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script type="module" src="app.js"></script>

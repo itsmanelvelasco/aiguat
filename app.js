@@ -1,4 +1,5 @@
 import { analyze, calibrate, RIVER } from './model.js';
+import { initLocal, handleClick, scheduleLocal, showAddress } from './local.js';
 
 const R = 20037508.342789244;
 const WMS = 'https://servicios.idee.es/wms-inspire/riesgos-naturales/inundaciones';
@@ -33,12 +34,13 @@ window.st = st;
 // ---------- map ----------
 const map = new maplibregl.Map({
   container: 'map',
-  center: [1.6, 41.75], zoom: 7.4, pitch: 45, bearing: -10, maxPitch: 80, antialias: true,
+  center: [1.6, 41.75], zoom: 7.4, pitch: 45, bearing: -10, maxPitch: 80, maxZoom: 20, antialias: true,
   style: {
     version: 8,
+    glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
     sources: {
       esri: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: 18, attribution: 'Esri' },
-      orto: { type: 'raster', tiles: ['https://geoserveis.icgc.cat/servei/catalunya/mapa-base/wmts/orto/MON3857NW/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19, attribution: '© ICGC' },
+      orto: { type: 'raster', tiles: ['https://geoserveis.icgc.cat/servei/catalunya/mapa-base/wmts/orto/MON3857NW/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 20, attribution: '© ICGC' },
       dem: { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 14, encoding: 'terrarium', attribution: 'Mapzen Terrarium' },
     },
     layers: [
@@ -49,12 +51,13 @@ const map = new maplibregl.Map({
     sky: { 'sky-color': '#0b1630', 'horizon-color': '#284a7a', 'fog-color': '#0b1630', 'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.6, 'fog-ground-blend': 0.2 },
   },
 });
+window.aiguatMap = map;
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 map.addControl(new maplibregl.ScaleControl(), 'bottom-right');
 
 map.on('load', () => {
   map.addSource('dem-hs', { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 14, encoding: 'terrarium' });
-  map.addLayer({ id: 'hill', type: 'hillshade', source: 'dem-hs', paint: { 'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#0a1020' } });
+  map.addLayer({ id: 'hill', type: 'hillshade', source: 'dem-hs', maxzoom: 15, paint: { 'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#0a1020' } });
   for (const o of OFFICIAL) {
     map.addSource(o.id, { type: 'raster', tileSize: 256, tiles: [`${WMS}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=${o.id}&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true`], attribution: 'SNCZI · IDEE' });
     map.addLayer({ id: o.id, type: 'raster', source: o.id, layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.7, 'raster-hue-rotate': 160, 'raster-saturation': 0.4 } });
@@ -62,10 +65,11 @@ map.on('load', () => {
   map.addSource('bbox', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'bbox-glow', type: 'line', source: 'bbox', paint: { 'line-color': '#38bdf8', 'line-width': 8, 'line-blur': 6, 'line-opacity': 0.5 } });
   map.addLayer({ id: 'bbox', type: 'line', source: 'bbox', paint: { 'line-color': '#7dd3fc', 'line-width': 1.5, 'line-dasharray': [2, 2] } });
+  initLocal(map, st, { runArea });
   setTimeout(() => runArea(HOTSPOTS[0]), 600);
 });
 
-map.on('click', (e) => runArea({ name: `${e.lngLat.lat.toFixed(3)}, ${e.lngLat.lng.toFixed(3)}`, lat: e.lngLat.lat, lon: e.lngLat.lng, z: st.z }));
+map.on('click', (e) => !handleClick(e) && runArea({ name: `${e.lngLat.lat.toFixed(3)}, ${e.lngLat.lng.toFixed(3)}`, lat: e.lngLat.lat, lon: e.lngLat.lng, z: st.z }));
 
 // ---------- geo helpers ----------
 const lon2x = (lon, z) => ((lon + 180) / 360) * 2 ** z;
@@ -81,7 +85,7 @@ function loadImg(url) {
 const toast = (t) => { $('toast').classList.toggle('hidden', !t); if (t) $('toastT').textContent = t; };
 const tick = () => new Promise((r) => setTimeout(r, 30));
 
-async function runArea(spot) {
+async function runArea(spot, quiet) {
   if (st.busy) return; st.busy = true;
   try {
     const z = spot.z, NT = 4, T = 256;
@@ -92,7 +96,7 @@ async function runArea(spot) {
     map.getSource('bbox').setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [...coords, coords[0]] } });
     $('areaName').textContent = spot.name;
     document.querySelectorAll('#hotspots button').forEach((b) => b.classList.toggle('on', b.textContent === spot.name));
-    map.flyTo({ center: [(west + east) / 2, (north + south) / 2], zoom: z - 1.15, pitch: 62, bearing: -18, duration: 2200, essential: true });
+    if (!quiet) map.flyTo({ center: [(west + east) / 2, (north + south) / 2], zoom: z - 1.15, pitch: 62, bearing: -18, duration: 2200, essential: true });
 
     toast(`Fetching ${NT * NT} elevation tiles (z${z})`);
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -113,8 +117,8 @@ async function runArea(spot) {
     const model = await analyze(elev, sea, W, H, cellArea, 1.5e6, async (s) => { toast(s); await tick(); });
     const ms = performance.now() - t0;
 
-    st.area = { spot, z, W, H, coords, elev, sea, cellArea, cell, bounds: { minx: (x0 / 2 ** z) * 2 * R - R, maxx: ((x0 + NT) / 2 ** z) * 2 * R - R, maxy: R - (y0 / 2 ** z) * 2 * R, miny: R - ((y0 + NT) / 2 ** z) * 2 * R } };
-    st.model = model;
+    st.area = { spot, z, x0, y0, W, H, coords, elev, sea, cellArea, cell, bounds: { minx: (x0 / 2 ** z) * 2 * R - R, maxx: ((x0 + NT) / 2 ** z) * 2 * R - R, maxy: R - (y0 / 2 ** z) * 2 * R, miny: R - ((y0 + NT) / 2 ** z) * 2 * R } };
+    st.model = model; st.depth = new Float32Array(W * H);
     st.official = null; st.calib = null;
     setupWater();
     buildCurve();
@@ -166,7 +170,7 @@ function setupWater() {
   if (map.getLayer('water')) map.removeLayer('water');
   if (map.getSource('water')) map.removeSource('water');
   map.addSource('water', { type: 'image', url: waterCanvas.toDataURL(), coordinates: coords });
-  map.addLayer({ id: 'water', type: 'raster', source: 'water', paint: { 'raster-opacity': 0.92, 'raster-fade-duration': 0, 'raster-resampling': 'linear' } }, 'bbox-glow');
+  map.addLayer({ id: 'water', type: 'raster', source: 'water', paint: { 'raster-opacity': 0.92, 'raster-fade-duration': 0, 'raster-resampling': 'linear' } }, 'alerts-fill');
 }
 
 let waterPending = false;
@@ -186,10 +190,11 @@ function render() {
   let n = 0, sum = 0, max = 0, land = 0, hit = 0, offN = 0;
   for (let i = 0, N = W * H; i < N; i++) {
     const e = elev[i], o = i * 4;
-    if (sea[i]) { d8[o + 3] = 0; continue; }
+    if (sea[i]) { d8[o + 3] = 0; st.depth[i] = 0; continue; }
     land++;
     let d = stage - hand[i];
     if (spill[i] <= surge) { const c = surge - (e > 0 ? e : 0); if (c > d) d = c; }
+    st.depth[i] = d > 0 ? d : 0;
     if (off && off[i]) offN++;
     if (d > 0.03) {
       n++; sum += d; if (d > max) max = d; if (off && off[i]) hit++;
@@ -214,6 +219,7 @@ function render() {
   $('surgeV').textContent = surge.toFixed(2) + ' m';
   $('stage').value = stage; $('surge').value = surge;
   drawCurveMarker();
+  scheduleLocal(); showAddress();
 }
 
 // ---------- stage-area curve ----------
@@ -283,7 +289,8 @@ async function loadForecast(spot) {
     ratio = qMed >= 3 ? Math.min(20, qPeak / qMed) : 1;
     spark('q', q, qmax, fut);
   } else $('q').innerHTML = '<div class="cap">No GloFAS river cell here</div>';
-  const pMax = Math.max(...p), p7 = p.reduce((a, b) => a + b, 0);
+  const pMax = Math.max(...p), p7 = p.reduce((a, b) => a + b, 0), kMax = p.indexOf(pMax);
+  st.fcPeak = pMax >= 1 ? `${new Date(days[kMax]).toLocaleDateString('ca', { weekday: 'short', day: 'numeric', month: 'short' })} (${pMax.toFixed(0)} mm)` : null;
   // Indicative mapping (not hydraulic): discharge anomaly + peak daily rain -> stage above channel
   const stage = Math.min(10, Math.max(0, 1.4 * Math.log(Math.max(1, ratio)) + 0.025 * pMax));
   st.fc = { stage, surge: 0 };
@@ -336,11 +343,11 @@ document.querySelectorAll('#res button').forEach((b) => b.onclick = () => {
 });
 for (const h of HOTSPOTS) { const b = document.createElement('button'); b.textContent = h.name; b.onclick = () => runArea(h); $('hotspots').appendChild(b); }
 for (const k in PRESETS) { const b = document.createElement('button'); b.textContent = PRESETS[k].name; b.onclick = () => applyPreset(PRESETS[k]); $('presets').appendChild(b); }
-for (const o of [...OFFICIAL, { id: 'drainage', name: 'Drainage network' }]) {
-  const b = document.createElement('button'); b.textContent = o.name;
+for (const o of [{ id: 'alerts', name: 'Alert blocks', layers: ['alerts-fill', 'alerts-line'], on: true }, { id: 'bldg', name: '3D buildings', layers: ['bldg'], on: true }, { id: 'aca', name: 'ACA gauges & dams', layers: ['aca-gauges', 'aca-gauges-lbl', 'aca-res', 'aca-res-lbl'], on: true }, { id: 'sewer', name: 'ACA sewer overflows', layers: ['aca-sewer'] }, ...OFFICIAL, { id: 'drainage', name: 'Drainage network' }]) {
+  const b = document.createElement('button'); b.textContent = o.name; if (o.on) b.classList.add('on');
   b.onclick = () => {
     const on = !b.classList.contains('on'); b.classList.toggle('on', on);
-    if (o.id === 'drainage') { st.drainage = on; render(); } else map.setLayoutProperty(o.id, 'visibility', on ? 'visible' : 'none');
+    if (o.id === 'drainage') { st.drainage = on; render(); } else for (const l of o.layers || [o.id]) if (map.getLayer(l)) map.setLayoutProperty(l, 'visibility', on ? 'visible' : 'none');
   };
   $('layers').appendChild(b);
 }
