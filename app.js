@@ -1,5 +1,5 @@
-import { analyze, calibrate, RIVER } from './model.js';
-import { initLocal, handleClick, scheduleLocal, showAddress } from './local.js';
+import { analyze, calibrate, RIVER } from './model.js?v=1794510244';
+import { initLocal, handleClick, scheduleLocal, showAddress } from './local.js?v=1794510244';
 
 const R = 20037508.342789244;
 const WMS = 'https://servicios.idee.es/wms-inspire/riesgos-naturales/inundaciones';

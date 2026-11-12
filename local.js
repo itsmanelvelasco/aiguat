@@ -31,8 +31,8 @@ export function initLocal(m, s, a) {
   map.addSource('ofm', { type: 'vector', url: 'https://tiles.openfreemap.org/planet', attribution: '© OpenStreetMap · OpenFreeMap' });
   map.addSource('alert-blocks', { type: 'geojson', data: fc([]) });
   map.addSource('flooded-bldg', { type: 'geojson', data: fc([]) });
-  map.addLayer({ id: 'alerts-fill', type: 'fill', source: 'alert-blocks', paint: { 'fill-color': ['get', 'c'], 'fill-opacity': 0.13 } }, before);
-  map.addLayer({ id: 'alerts-line', type: 'line', source: 'alert-blocks', paint: { 'line-color': ['get', 'c'], 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.4, 15, 1.6], 'line-opacity': 0.8 } }, before);
+  map.addLayer({ id: 'alerts-fill', type: 'fill', source: 'alert-blocks', paint: { 'fill-color': ['get', 'c'], 'fill-opacity': 0.38 } }, before);
+  map.addLayer({ id: 'alerts-line', type: 'line', source: 'alert-blocks', paint: { 'line-color': ['get', 'c'], 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.4, 15, 2.2], 'line-opacity': 0.95 } }, before);
   map.addLayer({ id: 'bldg', type: 'fill-extrusion', source: 'ofm', 'source-layer': 'building', minzoom: 14,
     paint: { 'fill-extrusion-color': '#d6dde8', 'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 8], 'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0], 'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 15, 0.82] } }, before);
   map.addLayer({ id: 'bldg-flood', type: 'fill-extrusion', source: 'flooded-bldg', minzoom: 13,
