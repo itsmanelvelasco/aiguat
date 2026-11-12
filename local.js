@@ -237,7 +237,7 @@ function computeBuildingsAndStreets() {
   const list = [...streets.values()].sort((a, b) => b.d - a.d).slice(0, 12);
   $('streetList').innerHTML = list.length ? list.map((s, k) => `<div class="res st" data-k="${k}"><span><i class="lv" style="background:${LV[levelOf(s.d)].c}"></i>${esc(s.n)}</span><b>${s.d.toFixed(2)} m</b></div>`).join('') : '<div class="cap">No streets flooded in view for this scenario.</div>';
   document.querySelectorAll('#streetList .st').forEach((el) => el.onclick = () => {
-    const s = list[+el.dataset.k]; map.flyTo({ center: [s.x, s.y], zoom: 17.2, pitch: 65, duration: 2000 });
+    const s = list[+el.dataset.k]; map.flyTo({ center: [s.x, s.y], zoom: 16, pitch: 60, duration: 2000 });
     draft({ target: s.n, level: levelOf(s.d), depth: s.d, scope: 'street' });
   });
 }
@@ -254,7 +254,7 @@ async function searchAddress() {
   if (L.marker) L.marker.remove();
   const el = document.createElement('div'); el.className = 'pin';
   L.marker = new maplibregl.Marker({ element: el }).setLngLat([lon, lat]).addTo(map);
-  map.flyTo({ center: [lon, lat], zoom: 17.5, pitch: 66, bearing: 25, duration: 3000 });
+  map.flyTo({ center: [lon, lat], zoom: 16, pitch: 60, bearing: 25, duration: 3000 });
   L.addr = { name, lon, lat };
   showAddress();
 }
