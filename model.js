@@ -57,18 +57,8 @@ export async function analyze(elev, sea, W, H, cellArea, streamAreaM2, onStep = 
   for (let k = n - 1; k >= 0; k--) { const i = order[k], r = rec[i]; if (r >= 0) acc[r] += acc[i]; }
 
   await onStep('HAND: height above nearest drainage');
-  const thr = streamAreaM2 / cellArea;
-  const hand = new Float32Array(N).fill(Infinity), type = new Uint8Array(N), dEl = new Float32Array(N), stream = new Uint8Array(N);
-  for (let k = 0; k < n; k++) {
-    const i = order[k];
-    if (sea[i]) { type[i] = SEA; dEl[i] = 0; hand[i] = 0; continue; }
-    if (acc[i] >= thr) { stream[i] = 1; type[i] = RIVER; dEl[i] = elev[i]; hand[i] = 0; continue; }
-    const r = rec[i];
-    if (r < 0 || type[r] === NONE) { type[i] = NONE; continue; }
-    type[i] = type[r]; dEl[i] = dEl[r];
-    const h = elev[i] - dEl[i]; hand[i] = h > 0 ? h : 0;
-  }
-
+  const base = { elev, sea, order, rec, acc, n, N };
+  const h = handFor(base, streamAreaM2 / cellArea);
   await onStep('Coastal connectivity (sea spill elevation)');
   const spill = new Float32Array(N).fill(Infinity);
   if (seaCells) {
@@ -84,7 +74,22 @@ export async function analyze(elev, sea, W, H, cellArea, streamAreaM2, onStep = 
       }
     }
   }
-  return { hand, type, spill, stream, acc, seaCells };
+  return { ...h, spill, acc, rec, order, n, seaCells, base };
+}
+
+// HAND for a given stream-initiation threshold (cells). Cheap: one pass over the drainage order.
+export function handFor({ elev, sea, order, rec, acc, n, N }, thr) {
+  const hand = new Float32Array(N).fill(Infinity), type = new Uint8Array(N), dEl = new Float32Array(N), stream = new Uint8Array(N);
+  for (let k = 0; k < n; k++) {
+    const i = order[k];
+    if (sea[i]) { type[i] = SEA; dEl[i] = 0; hand[i] = 0; continue; }
+    if (acc[i] >= thr) { stream[i] = 1; type[i] = RIVER; dEl[i] = elev[i]; hand[i] = 0; continue; }
+    const r = rec[i];
+    if (r < 0 || type[r] === NONE) { type[i] = NONE; continue; }
+    type[i] = type[r]; dEl[i] = dEl[r];
+    const h = elev[i] - dEl[i]; hand[i] = h > 0 ? h : 0;
+  }
+  return { hand, type, dEl, stream, thr };
 }
 
 // Flooded cells vs official mask, swept over river stage using HAND histograms.

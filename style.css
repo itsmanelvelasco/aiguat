@@ -84,3 +84,6 @@ button.primary:disabled { opacity: .4; cursor: default; filter: none; }
 .pt { font-size: 10px; text-transform: uppercase; letter-spacing: .12em; color: var(--mu); }
 .pin { width: 22px; height: 22px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: #f43f5e; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(244,63,94,.3), 0 0 24px #f43f5e; }
 #hint { white-space: nowrap; }
+.tog { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 8px; color: #c7d3e8; cursor: pointer; }
+#dbSel { flex: 1; min-width: 0; background: rgba(255,255,255,.06); color: #e2e8f0; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12px; }
+#dbSel option { background: #0f172a; }

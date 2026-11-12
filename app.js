@@ -1,5 +1,5 @@
-import { analyze, calibrate, RIVER } from './model.js?v=1794510244';
-import { initLocal, handleClick, scheduleLocal, showAddress } from './local.js?v=1794510244';
+import { analyze, calibrate, handFor, RIVER } from './model.js?v=1794512140';
+import { initLocal, handleClick, scheduleLocal, showAddress, upstreamDams, liveStage } from './local.js?v=1794512140';
 
 const R = 20037508.342789244;
 const WMS = 'https://servicios.idee.es/wms-inspire/riesgos-naturales/inundaciones';
@@ -65,7 +65,8 @@ map.on('load', () => {
   map.addSource('bbox', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'bbox-glow', type: 'line', source: 'bbox', paint: { 'line-color': '#38bdf8', 'line-width': 8, 'line-blur': 6, 'line-opacity': 0.5 } });
   map.addLayer({ id: 'bbox', type: 'line', source: 'bbox', paint: { 'line-color': '#7dd3fc', 'line-width': 1.5, 'line-dasharray': [2, 2] } });
-  initLocal(map, st, { runArea });
+  initCatalonia();
+  initLocal(map, st, { runArea, damBreak, onACA: refreshDams });
   setTimeout(() => runArea(HOTSPOTS[0]), 600);
 });
 
@@ -119,11 +120,14 @@ async function runArea(spot, quiet) {
 
     st.area = { spot, z, x0, y0, W, H, coords, elev, sea, cellArea, cell, bounds: { minx: (x0 / 2 ** z) * 2 * R - R, maxx: ((x0 + NT) / 2 ** z) * 2 * R - R, maxy: R - (y0 / 2 ** z) * 2 * R, miny: R - ((y0 + NT) / 2 ** z) * 2 * R } };
     st.model = model; st.depth = new Float32Array(W * H);
-    st.official = null; st.calib = null;
+    st.official = null; st.calib = null; st.calibAlt = null; st.db = null;
+    st.area.bb = { w: west, e: east, n: north, s: south };
+    st.dams = upstreamDams(st.area.bb);
     setupWater();
     buildCurve();
     toast(`Model ready in ${(ms / 1000).toFixed(1)} s · ${(W * H / 1e6).toFixed(2)}M cells @ ${cell.toFixed(0)} m — checking official maps & forecasts`);
     if (spot.preset) applyPreset(PRESETS[spot.preset], true); else render();
+    if (spot.onReady) spot.onReady();
     await Promise.allSettled([loadOfficial(), loadForecast(spot)]);
     render();
     toast(null);
@@ -186,7 +190,8 @@ function pushWater() {
 function render() {
   if (!st.model) return;
   const { elev, sea, W, H, cellArea } = st.area, { hand, spill, stream, type } = st.model, d8 = waterImg.data;
-  const stage = st.stage, surge = st.surge, drain = st.drainage, off = st.official;
+  const stage = effStage(st.stage), surge = st.surge, drain = st.drainage, off = st.official, db = st.db;
+  const dbF = db ? db.front : 0;
   let n = 0, sum = 0, max = 0, land = 0, hit = 0, offN = 0;
   for (let i = 0, N = W * H; i < N; i++) {
     const e = elev[i], o = i * 4;
@@ -194,6 +199,7 @@ function render() {
     land++;
     let d = stage - hand[i];
     if (spill[i] <= surge) { const c = surge - (e > 0 ? e : 0); if (c > d) d = c; }
+    if (db) { const x = db.dist[i]; if (x > 0 && x <= dbF) { const c = db.H0 * (1 / (1 + x / db.L)) ** 0.6 + db.rel[i]; if (c > d) d = c; } }
     st.depth[i] = d > 0 ? d : 0;
     if (off && off[i]) offN++;
     if (d > 0.03) {
@@ -219,17 +225,115 @@ function render() {
   $('surgeV').textContent = surge.toFixed(2) + ' m';
   $('stage').value = stage; $('surge').value = surge;
   drawCurveMarker();
+  damNote(stage);
+  renderCat();
   scheduleLocal(); showAddress();
 }
 
+// ---------- dam regulation (ACA live) ----------
+// Upstream reservoirs absorb part of the flood volume: attenuation = spare / (spare + flood volume in area).
+function refreshDams() { st.dams = st.area ? upstreamDams(st.area.bb) : null; if (st.model) render(); }
+function effStage(s) {
+  const d = st.dams; if (!$('damReg').checked || !d || !d.spare || !volData || s <= 0) return s;
+  const V = volAt(s), S = d.spare * 1e6, Ve = (V * V) / (S + V);
+  let lo = 0, hi = s; for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; if (volAt(m) < Ve) lo = m; else hi = m; }
+  return lo;
+}
+function volAt(s) { const b = Math.min(volData.length - 1, s / 0.1), k = Math.floor(b), f = b - k; return k + 1 < volData.length ? volData[k] * (1 - f) + volData[k + 1] * f : volData[k]; }
+function damNote(se) {
+  const d = st.dams, el = $('damNote');
+  if (!st.area) return;
+  if (!d) { el.textContent = 'Loading ACA reservoirs…'; return; }
+  if (!d.dams.length) { el.innerHTML = `No ACA-managed dam upstream${d.conca ? ` in basin ${d.conca}` : ''}${st.area.spot.lon < 1.1 && st.area.spot.lat < 41.3 ? ' (the Ebre is regulated by CHE reservoirs, no open live feed)' : ''}.`; return; }
+  const on = $('damReg').checked;
+  el.innerHTML = `${d.dams.map((r) => r.name).join(' + ')} (${d.conca}) can still store <b>${d.spare.toFixed(0)} hm³</b>.` + (on && st.stage > 0 ? ` Effective river stage <b>${se.toFixed(1)} m</b> instead of ${st.stage.toFixed(1)} m (−${(100 * (1 - se / st.stage)).toFixed(0)}%).` : '');
+}
+$('damReg').onchange = () => render();
+
+// ---------- live ACA readings -> scenario ----------
+$('liveGo').onclick = () => {
+  if (!st.area) return;
+  const l = liveStage(st.area.bb);
+  if (!l) { $('liveNote').textContent = 'No ACA gauge in or near this area (Ebre gauges are CHE).'; return; }
+  $('liveNote').innerHTML = `${l.n} ACA gauge(s) in ${l.conca}. Highest today: <b>${l.gauge.name}</b> ${l.gauge.q} m³/s = ${l.gauge.ratio.toFixed(2)}× its 30-day mean → stage <b>${l.stage.toFixed(1)} m</b> (30-day peak would give ${l.peakStage.toFixed(1)} m).`;
+  animateTo(l.stage, 0);
+};
+
+// ---------- dam-break (indicative) ----------
+// Peak outflow: Froehlich (1995) Qp = 0.607 V^0.295 h^1.24; normal depth in a 200 m wide valley (Manning n=0.04, S=0.002);
+// attenuation H(x) = H0 (1 + x/L)^-0.6. Every cell draining into the dam's downstream path floods up to that water level.
+async function damBreak(r) {
+  const Vm3 = r.vol * 1e6, Qp = 0.607 * Vm3 ** 0.295 * r.height ** 1.24, H0 = Math.min(40, ((Qp * 0.04) / (200 * Math.sqrt(0.002))) ** 0.6);
+  $('dbNote').innerHTML = `Analysing 60 km downstream of ${esc(r.name)}…`;
+  await runArea({ name: `Dam break · ${r.name}`, lat: r.lat, lon: r.lon, z: 11, onReady: () => {} }, false);
+  const { W, H, elev, sea, x0, y0, z, cell } = st.area, { rec, acc, order, n } = st.model, N = W * H;
+  const px = Math.floor((lon2x(r.lon, z) - x0) * 256), py = Math.floor((lat2y(r.lat, z) - y0) * 256);
+  let dam = -1, best = -1, rad = Math.ceil(800 / cell);
+  for (let y = Math.max(0, py - rad); y <= Math.min(H - 1, py + rad); y++) for (let x = Math.max(0, px - rad); x <= Math.min(W - 1, px + rad); x++) { const i = y * W + x; if (acc[i] > best) { best = acc[i]; dam = i; } }
+  const pd = new Float32Array(N).fill(-1); let i = dam, dist = 0, len = 0;
+  while (i >= 0 && !sea[i]) { pd[i] = dist; const j = rec[i]; if (j < 0) break; const dx = (j % W) - (i % W), dy = Math.floor(j / W) - Math.floor(i / W); dist += Math.hypot(dx, dy) * cell; i = j; len++; }
+  const mid = []; for (let c = 0, best2 = Infinity; c < N; c++) if (pd[c] >= 0 && Math.abs(pd[c] - dist / 2) < best2) { best2 = Math.abs(pd[c] - dist / 2); mid[0] = c; }
+  if (mid.length) { const c = mid[0]; map.flyTo({ center: [x2lon(x0 + (c % W) / 256, z), y2lat(y0 + Math.floor(c / W) / 256, z)], zoom: 11.3, pitch: 60, bearing: -10, duration: 2500 }); }
+  const jd = new Float32Array(N), jel = new Float32Array(N), rel = new Float32Array(N);
+  for (let k = 0; k < n; k++) {
+    const c = order[k];
+    if (pd[c] >= 0) { jd[c] = pd[c]; jel[c] = elev[c]; } else { const p = rec[c]; if (p >= 0) { jd[c] = jd[p]; jel[c] = jel[p]; } }
+    rel[c] = jel[c] - elev[c];
+  }
+  for (let c = 0; c < N; c++) if (jd[c] < 1500) jd[c] = 0; // skip the reservoir itself and the dam toe
+  st.db = { dist: jd, rel, H0, L: 10000, front: 0 };
+  st.stage = 0; st.surge = 0;
+  $('dbNote').innerHTML = `<b>${esc(r.name)}</b>: ${r.vol.toFixed(0)} hm³ behind a ~${r.height} m wall → peak outflow ≈ <b>${(Qp / 1000).toFixed(0)}k m³/s</b>, flood wave ${H0.toFixed(0)} m deep at the dam, followed ${(dist / 1000).toFixed(0)} km downstream. Indicative only, not an official emergency plan.`;
+  const t0 = performance.now(), T = 9000;
+  const f = (t) => { const k = Math.min(1, (t - t0) / T); st.db.front = 1500 + k * dist; render(); if (k < 1 && st.db) requestAnimationFrame(f); };
+  requestAnimationFrame(f);
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---------- Catalonia-wide screening layer (precomputed by tools/build-catalonia.html) ----------
+const CAT = { z: 10, x0: 512, y0: 376, nx: 10, ny: 10 };
+let cat = null, catPending = false;
+async function initCatalonia() {
+  const im = await loadImg('data/catalonia.png'), W = im.width, H = im.height;
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(im, 0, 0);
+  const px = x.getImageData(0, 0, W, H).data, hand = new Float32Array(W * H), spill = new Float32Array(W * H), inside = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) { hand[i] = px[i * 4] === 255 ? Infinity : px[i * 4] / 10; spill[i] = px[i * 4 + 1] === 255 ? Infinity : px[i * 4 + 1] / 40; inside[i] = px[i * 4 + 2] > 0; }
+  const img = x.createImageData(W, H);
+  const w = x2lon(CAT.x0, CAT.z), e = x2lon(CAT.x0 + CAT.nx, CAT.z), n = y2lat(CAT.y0, CAT.z), s = y2lat(CAT.y0 + CAT.ny, CAT.z);
+  cat = { W, H, hand, spill, inside, c, x, img, coords: [[w, n], [e, n], [e, s], [w, s]], on: true };
+  map.addSource('cat-water', { type: 'image', url: c.toDataURL(), coordinates: cat.coords });
+  map.addLayer({ id: 'cat-water', type: 'raster', source: 'cat-water', paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.8, 13, 0], 'raster-fade-duration': 0 } }, 'bbox-glow');
+  renderCat();
+}
+function renderCat() {
+  if (!cat || catPending) return; catPending = true;
+  setTimeout(() => {
+    catPending = false;
+    const { W, H, hand, spill, inside, img } = cat, d8 = img.data, s = st.stage, g = st.surge;
+    let n = 0;
+    for (let i = 0; i < W * H; i++) {
+      let d = inside[i] && cat.on ? s - hand[i] : 0;
+      if (inside[i] && cat.on && spill[i] <= g) { const c = g - spill[i]; if (c > d) d = c; }
+      const o = i * 4;
+      if (d > 0.05) { n++; const l = Math.min(255, (d / 6) * 255) << 2; d8[o] = LUT[l]; d8[o + 1] = LUT[l + 1]; d8[o + 2] = LUT[l + 2]; d8[o + 3] = LUT[l + 3]; } else d8[o + 3] = 0;
+    }
+    cat.x.putImageData(img, 0, 0);
+    map.getSource('cat-water').updateImage({ url: cat.c.toDataURL(), coordinates: cat.coords });
+    $('catNote').innerHTML = cat.on ? `Catalonia-wide screening: <b>${((n * 228 * 228) / 1e6).toFixed(0)} km²</b> under water if every main river rose ${s.toFixed(1)} m${g ? ` and the sea ${g.toFixed(1)} m` : ''} (230 m grid).` : '';
+  }, 120);
+}
+
 // ---------- stage-area curve ----------
-let curveData = null;
+let curveData = null, volData = null;
 function buildCurve() {
   const { elev, sea, cellArea } = st.area, { hand, type } = st.model, step = 0.1, bins = 121, h = new Float64Array(bins + 1);
   for (let i = 0; i < elev.length; i++) if (!sea[i] && type[i] && hand[i] < 12) h[Math.floor(hand[i] / step) + 1]++;
   const pts = []; let c = 0;
   for (let b = 0; b <= bins; b++) { c += h[b]; pts.push([b * step, (c * cellArea) / 1e6]); }
-  curveData = pts; drawCurveMarker();
+  curveData = pts;
+  const hs = new Float64Array(bins + 1); for (let i = 0; i < elev.length; i++) if (!sea[i] && type[i] && hand[i] < 12) hs[Math.floor(hand[i] / step) + 1] += hand[i];
+  volData = []; let cc = 0, sh = 0; for (let b = 0; b <= bins; b++) { cc += h[b]; sh += hs[b]; volData.push(cellArea * Math.max(0, cc * b * step - sh)); }
+  drawCurveMarker();
 }
 function drawCurveMarker() {
   if (!curveData) return;
@@ -264,11 +368,23 @@ async function loadOfficial() {
   if (!n) { st.official = null; $('vIoU').textContent = 'n/a'; $('vRecall').textContent = 'n/a'; $('vNote').textContent = 'No official 100-yr fluvial zone mapped inside this area.'; return; }
   st.official = off;
   st.calib = calibrate(st.model, st.area.sea, off, 12, 0.1);
+  // Also search the stream-network density (upstream area that starts a river) — HAND is very sensitive to it.
+  let alt = null;
+  for (const km2 of [0.5, 1.5, 5, 15, 50, 150]) {
+    const hh = handFor(st.model.base, (km2 * 1e6) / st.area.cellArea), c = calibrate(hh, st.area.sea, off, 12, 0.1);
+    if (!alt || c.best.iou > alt.c.best.iou) alt = { km2, hh, c };
+    await tick(); if (st.area !== area) return;
+  }
+  st.calibAlt = alt;
   $('calib').disabled = false;
-  $('vNote').textContent = `${((n * st.area.cellArea) / 1e6).toFixed(1)} km² of official T100 zone in area. Best fit: ${st.calib.best.stage.toFixed(1)} m stage → IoU ${st.calib.best.iou.toFixed(2)}.`;
+  $('vNote').textContent = `${((n * st.area.cellArea) / 1e6).toFixed(1)} km² of official T100 zone in area. Default network (1.5 km²): best IoU ${st.calib.best.iou.toFixed(2)} at ${st.calib.best.stage.toFixed(1)} m. Tuned network (${alt.km2} km²): IoU ${alt.c.best.iou.toFixed(2)} at ${alt.c.best.stage.toFixed(1)} m (in-sample fit).`;
   drawCurveMarker();
 }
-$('calib').onclick = () => { if (st.calib) animateTo(st.calib.best.stage, 0); };
+$('calib').onclick = () => {
+  const a = st.calibAlt;
+  if (a && a.c.best.iou > st.calib.best.iou) { Object.assign(st.model, a.hh); st.calib = a.c; buildCurve(); }
+  if (st.calib) { $('damReg').checked = false; animateTo(st.calib.best.stage, 0); }
+};
 
 // ---------- live forecast ----------
 async function loadForecast(spot) {
@@ -343,11 +459,11 @@ document.querySelectorAll('#res button').forEach((b) => b.onclick = () => {
 });
 for (const h of HOTSPOTS) { const b = document.createElement('button'); b.textContent = h.name; b.onclick = () => runArea(h); $('hotspots').appendChild(b); }
 for (const k in PRESETS) { const b = document.createElement('button'); b.textContent = PRESETS[k].name; b.onclick = () => applyPreset(PRESETS[k]); $('presets').appendChild(b); }
-for (const o of [{ id: 'alerts', name: 'Alert blocks', layers: ['alerts-fill', 'alerts-line'], on: true }, { id: 'bldg', name: '3D buildings', layers: ['bldg'], on: true }, { id: 'aca', name: 'ACA gauges & dams', layers: ['aca-gauges', 'aca-gauges-lbl', 'aca-res', 'aca-res-lbl'], on: true }, { id: 'sewer', name: 'ACA sewer overflows', layers: ['aca-sewer'] }, ...OFFICIAL, { id: 'drainage', name: 'Drainage network' }]) {
+for (const o of [{ id: 'alerts', name: 'Alert blocks', layers: ['alerts-fill', 'alerts-line'], on: true }, { id: 'bldg', name: '3D buildings', layers: ['bldg'], on: true }, { id: 'aca', name: 'ACA gauges & dams', layers: ['aca-gauges', 'aca-gauges-lbl', 'aca-res', 'aca-res-lbl'], on: true }, { id: 'sewer', name: 'ACA sewer overflows', layers: ['aca-sewer'] }, ...OFFICIAL, { id: 'drainage', name: 'Drainage network' }, { id: 'cat', name: 'Catalonia-wide flood', on: true }]) {
   const b = document.createElement('button'); b.textContent = o.name; if (o.on) b.classList.add('on');
   b.onclick = () => {
     const on = !b.classList.contains('on'); b.classList.toggle('on', on);
-    if (o.id === 'drainage') { st.drainage = on; render(); } else for (const l of o.layers || [o.id]) if (map.getLayer(l)) map.setLayoutProperty(l, 'visibility', on ? 'visible' : 'none');
+    if (o.id === 'drainage') { st.drainage = on; render(); } else if (o.id === 'cat') { if (cat) { cat.on = on; renderCat(); } } else for (const l of o.layers || [o.id]) if (map.getLayer(l)) map.setLayoutProperty(l, 'visibility', on ? 'visible' : 'none');
   };
   $('layers').appendChild(b);
 }

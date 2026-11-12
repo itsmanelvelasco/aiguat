@@ -56,6 +56,8 @@ export function initLocal(m, s, a) {
 }
 
 const fc = (features) => ({ type: 'FeatureCollection', features });
+// Approximate dam wall heights (m), public reference values; used only for the indicative dam-break scenario.
+const DAM_H = { susqueda: 135, 'de sau': 83, pasteral: 32, baells: 102, 'llosa del cavall': 122, boadella: 63, 'sant ponç': 52, siurana: 63, foix: 38, riudecanyes: 54 };
 
 // ---------------- ACA live data ----------------
 async function loadACA() {
@@ -76,14 +78,18 @@ async function loadACA() {
     coords[g.estaci] = [lon, lat];
     if (g.estaci.startsWith('Embassament')) continue;
     const ratio = avg > 0.05 ? q / avg : 1;
-    L.gauges.push({ name: g.estaci.replace('Aforament - ', '').replace('Qualitat - ', ''), conca: g.conca, subconca: g.subconca, q, avg, max30: h ? +h.m : NaN, ratio, lon, lat });
+    L.gauges.push({ full: g.estaci, name: g.estaci.replace('Aforament - ', '').replace('Qualitat - ', ''), conca: g.conca, subconca: g.subconca, q, avg, max30: h ? +h.m : NaN, ratio, lon, lat });
   }
   const seen = new Set(); L.reservoirs = [];
+  const concaOf = Object.fromEntries(today.map((t) => [t.estaci, t.conca]));
   for (const r of res) {
     if (seen.has(r.estaci)) continue; seen.add(r.estaci);
     const c = coords[r.estaci]; if (!c) continue;
     const out = today.find((t) => t.estaci === r.estaci);
-    L.reservoirs.push({ name: r.estaci.replace('Embassament de ', '').replace('Embassament del ', '').replace(/ \(.*\)/, ''), full: r.estaci, pct: +r.percentatge_volum_embassat, vol: +r.volum_embassat, level: +r.nivell_absolut, outflow: out ? +out.cabal_riu_m3_s : null, day: r.dia.slice(0, 10), lon: c[0], lat: c[1] });
+    L.reservoirs.push({ name: r.estaci.replace('Embassament de ', '').replace('Embassament del ', '').replace(/ \(.*\)/, ''), full: r.estaci, pct: +r.percentatge_volum_embassat, vol: +r.volum_embassat, level: +r.nivell_absolut, outflow: out ? +out.cabal_riu_m3_s : null, day: r.dia.slice(0, 10), lon: c[0], lat: c[1], conca: concaOf[r.estaci] });
+    const R = L.reservoirs[L.reservoirs.length - 1];
+    R.capacity = R.pct > 0 ? (R.vol / R.pct) * 100 : R.vol; R.spare = Math.max(0, R.capacity - R.vol);
+    R.height = (Object.entries(DAM_H).find(([k]) => R.full.toLowerCase().includes(k)) || [0, 60])[1];
   }
   L.reservoirs.sort((a, b) => b.vol - a.vol);
   const pt = (o, props) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [o.lon, o.lat] }, properties: props });
@@ -115,6 +121,11 @@ async function loadACA() {
     ? above.slice(0, 6).map((g) => `<div class="res g" data-lon="${g.lon}" data-lat="${g.lat}"><span>${esc(g.name)}</span><b style="color:${g.ratio >= 3 ? '#ef4444' : '#f59e0b'}">${g.ratio.toFixed(1)}× normal</b></div>`).join('')
     : '<div class="cap">All gauges within normal range (≤1.5× their 30-day mean).</div>';
   document.querySelectorAll('#resList .res').forEach((el) => el.onclick = () => { const r = L.reservoirs[+el.dataset.k]; map.flyTo({ center: [r.lon, r.lat], zoom: 13.5, pitch: 65, duration: 2500 }); setTimeout(() => popRes(r), 2600); });
+  $('dbSel').innerHTML = L.reservoirs.map((r, k) => `<option value="${k}">${esc(r.name)} · ${r.vol.toFixed(0)} hm³ · wall ~${r.height} m</option>`).join('');
+  $('dbGo').disabled = false;
+  $('dbGo').onclick = () => api.damBreak(L.reservoirs[+$('dbSel').value]);
+  $('liveGo').disabled = false;
+  api.onACA && api.onACA();
   document.querySelectorAll('#gaugeList .g').forEach((el) => el.onclick = () => map.flyTo({ center: [+el.dataset.lon, +el.dataset.lat], zoom: 14, pitch: 60, duration: 2500 }));
 }
 
@@ -127,13 +138,52 @@ function popRes(r) {
 }
 function popGauge(g) {
   popup([g.lon, g.lat], `<div class="pt">ACA river gauge · ${esc(g.conca)}</div><h4>${esc(g.name)}</h4>
-    <div class="kv"><span>Flow today</span><b>${g.q} m³/s</b><span>30-day mean</span><b>${isNaN(g.avg) ? '–' : g.avg.toFixed(2) + ' m³/s'}</b><span>30-day max</span><b>${isNaN(g.max30) ? '–' : g.max30 + ' m³/s'}</b><span>Anomaly</span><b style="color:${g.ratio >= 3 ? '#ef4444' : g.ratio >= 1.5 ? '#f59e0b' : '#22d3ee'}">${g.ratio.toFixed(2)}×</b></div>`);
+    <div class="kv"><span>Flow today</span><b>${g.q} m³/s</b><span>30-day mean</span><b>${isNaN(g.avg) ? '–' : g.avg.toFixed(2) + ' m³/s'}</b><span>30-day max</span><b>${isNaN(g.max30) ? '–' : g.max30 + ' m³/s'}</b><span>Anomaly</span><b style="color:${g.ratio >= 3 ? '#ef4444' : g.ratio >= 1.5 ? '#f59e0b' : '#22d3ee'}">${g.ratio.toFixed(2)}×</b></div>
+    <div class="cap">Last 24 h · 5-min ACA readings</div><div class="chart sm" id="gLive"><div class="cap">Loading real-time series…</div></div>`);
+  liveSeries(g).then((h) => { const el = document.getElementById('gLive'); if (el) el.innerHTML = h; }).catch(() => { const el = document.getElementById('gLive'); if (el) el.innerHTML = '<div class="cap">Real-time series unavailable</div>'; });
+}
+async function liveSeries(g) {
+  const [{ d }] = await soql('3yr3-vq6y', { $select: 'max(dia) as d', $where: `estacio='${g.full.replace(/'/g, "''")}'` });
+  if (!d) return '<div class="cap">No real-time series for this gauge</div>';
+  const rows = await soql('3yr3-vq6y', { $select: 'hora,tipus_variable,valor', $where: `estacio='${g.full.replace(/'/g, "''")}' and dia='${d}'`, $order: 'hora', $limit: 1000 });
+  const q = rows.filter((r) => r.tipus_variable === 'Cabal riu').map((r) => +r.valor), lv = rows.filter((r) => r.tipus_variable === 'Nivell riu').map((r) => +r.valor);
+  if (q.length < 2) return '<div class="cap">No real-time flow today</div>';
+  const w = 280, h = 54, mx = Math.max(...q), mn = Math.min(...q), X = (i) => (i / (q.length - 1)) * w, Y = (v) => h - 6 - ((v - mn) / (mx - mn || 1)) * (h - 16);
+  const last = rows[rows.length - 1];
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><path d="${q.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join('')}" fill="none" stroke="#22d3ee" stroke-width="1.8"/>
+    <text x="2" y="10" fill="#8ea0bf" font-size="9">${mx.toFixed(2)} m³/s</text><text x="2" y="${h - 1}" fill="#8ea0bf" font-size="9">${mn.toFixed(2)}</text></svg>
+    <div class="cap">${d.slice(0, 10)} up to ${last.hora}${lv.length ? ` · river level ${lv[lv.length - 1].toFixed(2)} m` : ''} · ${q.length} readings</div>`;
+}
+
+// ---------------- hooks for the scenario engine ----------------
+function areaConca(b) {
+  const inside = L.gauges.filter((g) => g.lon >= b.w && g.lon <= b.e && g.lat >= b.s && g.lat <= b.n);
+  const pool = inside.length ? inside : [...L.gauges].sort((p, q) => dist2(p, b) - dist2(q, b)).slice(0, 1).filter((g) => Math.sqrt(dist2(g, b)) * 111 < 25);
+  const cnt = {}; for (const g of pool) cnt[g.conca] = (cnt[g.conca] || 0) + 1;
+  const conca = Object.keys(cnt).sort((p, q) => cnt[q] - cnt[p])[0] || null;
+  return { conca, gauges: pool.filter((g) => g.conca === conca) };
+}
+const dist2 = (g, b) => (g.lon - (b.w + b.e) / 2) ** 2 + (g.lat - (b.s + b.n) / 2) ** 2;
+// Reservoirs in the same river basin as the analysed area (all ACA dams sit upstream of the lowland hotspots).
+export function upstreamDams(b) {
+  if (!L.reservoirs.length) return null;
+  const { conca } = areaConca(b);
+  const dams = L.reservoirs.filter((r) => conca && r.conca && r.conca.toUpperCase() === conca.toUpperCase() && !(r.lon >= b.w && r.lon <= b.e && r.lat >= b.s && r.lat <= b.n));
+  return { conca, dams, spare: dams.reduce((a, r) => a + r.spare, 0) };
+}
+// Stage suggested by today's ACA gauge readings in the area's basin (flow anomaly vs 30-day mean).
+export function liveStage(b) {
+  const { conca, gauges } = areaConca(b);
+  if (!gauges.length) return null;
+  const g = gauges.reduce((p, q) => (q.ratio > p.ratio ? q : p));
+  const peak = isNaN(g.max30) || !(g.avg > 0) ? 1 : g.max30 / g.avg;
+  return { conca, gauge: g, stage: Math.min(10, 1.4 * Math.log(Math.max(1, g.ratio))), peakStage: Math.min(10, 1.4 * Math.log(Math.max(1, peak))), n: gauges.length };
 }
 
 // Returns true if the click was consumed by a local feature.
 export function handleClick(e) {
-  const layers = ['aca-res', 'aca-gauges', 'aca-sewer', 'alerts-fill'].filter((l) => map.getLayer(l));
-  const f = map.queryRenderedFeatures(e.point, { layers })[0];
+  const p = e.point, pick = (ls, r) => map.queryRenderedFeatures([[p.x - r, p.y - r], [p.x + r, p.y + r]], { layers: ls.filter((l) => map.getLayer(l)) })[0];
+  const f = pick(['aca-res', 'aca-gauges'], 10) || pick(['aca-sewer'], 5) || pick(['alerts-fill'], 0);
   if (f) {
     if (f.layer.id === 'aca-res') popRes(L.reservoirs[f.properties.k]);
     else if (f.layer.id === 'aca-gauges') popGauge(L.gauges[f.properties.k]);

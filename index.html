@@ -7,7 +7,7 @@
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-<link href="style.css?v=1794510244" rel="stylesheet" />
+<link href="style.css?v=1794512140" rel="stylesheet" />
 </head>
 <body>
 <div id="map"></div>
@@ -39,6 +39,8 @@
       <input type="range" id="surge" min="0" max="5" step="0.05" value="0" />
     </div>
     <div class="chips" id="presets"></div>
+    <label class="tog"><input type="checkbox" id="damReg" checked /> Dam regulation · ACA live spare capacity</label>
+    <div class="cap" id="damNote"></div>
     <button id="animate" class="primary">▶ Simulate rising water</button>
   </section>
 
@@ -52,6 +54,7 @@
     </div>
     <div class="chart" id="curve"></div>
     <div class="cap">Flooded area vs river stage · dot = current scenario</div>
+    <div class="cap" id="catNote"></div>
   </section>
 
   <section>
@@ -89,6 +92,9 @@
     <div id="resList" class="list"></div>
     <div class="cap" style="margin-top:8px">Rivers above normal today</div>
     <div id="gaugeList" class="list"></div>
+    <div class="cap" style="margin-top:8px">Dam-break scenario · indicative</div>
+    <div class="row addr"><select id="dbSel"></select><button id="dbGo" class="ghost sm" disabled>Break dam</button></div>
+    <div class="cap" id="dbNote"></div>
   </section>
 
   <section>
@@ -109,6 +115,8 @@
     </div>
     <div class="cap" id="fcNote">–</div>
     <button id="applyFc" class="ghost" disabled>☔ Apply forecast scenario</button>
+    <button id="liveGo" class="ghost" disabled>📡 Apply today's ACA river readings</button>
+    <div class="cap" id="liveNote"></div>
   </section>
 
   <section>
@@ -136,6 +144,6 @@
 <div id="hint">Click outside the box to analyse a new area · inside to probe water depth · zoom in for streets & buildings</div>
 
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<script type="module" src="app.js?v=1794510244"></script>
+<script type="module" src="app.js?v=1794512140"></script>
 </body>
 </html>

@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Build Catalonia-wide HAND raster</title>
+<pre id="log"></pre>
+<script type="module">
+// Runs the same terrain model on all of Catalonia (Terrarium z10, ~115 m cells) and writes
+// data/catalonia.png: R = HAND×10 (m, 255 = no drainage), G = sea-spill elevation×40 (m, 255 = high),
+// B = 255 inside Catalonia (land), A = 255. Streams start at 25 km² upstream area (main rivers only). Downsampled 2× (min) for fast in-browser rendering.
+import { analyze } from '../model.js';
+const Z = 10, X0 = 512, Y0 = 376, NX = 10, NY = 10, T = 256, W = NX * T, H = NY * T;
+const log = (s) => (document.getElementById('log').textContent += s + '\n');
+const img = (u) => new Promise((r, j) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => r(i); i.onerror = j; i.src = u; });
+const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+const ctx = cv.getContext('2d', { willReadFrequently: true });
+await Promise.all([...Array(NX * NY)].map(async (_, k) => {
+  const tx = X0 + (k % NX), ty = Y0 + Math.floor(k / NX);
+  ctx.drawImage(await img(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${Z}/${tx}/${ty}.png`), (k % NX) * T, Math.floor(k / NX) * T);
+}));
+log('tiles loaded');
+const px = ctx.getImageData(0, 0, W, H).data, N = W * H, elev = new Float32Array(N);
+for (let i = 0; i < N; i++) elev[i] = px[i * 4] * 256 + px[i * 4 + 1] + px[i * 4 + 2] / 256 - 32768;
+const sea = new Uint8Array(N), q = new Int32Array(N); let qh = 0, qt = 0;
+const cand = (i) => elev[i] === 0 || elev[i] < -10;
+for (let i = 0; i < N; i++) { const x = i % W, y = (i - x) / W; if ((x === 0 || y === 0 || x === W - 1 || y === H - 1) && cand(i)) { sea[i] = 1; q[qt++] = i; } }
+while (qh < qt) { const i = q[qh++], x = i % W; for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) { if (j < 0 || j >= N || sea[j] || !cand(j)) continue; sea[j] = 1; q[qt++] = j; } }
+const lat = 41.7, cell = (40075016.686 * Math.cos((lat * Math.PI) / 180)) / (T * 2 ** Z);
+const t0 = performance.now();
+const m = await analyze(elev, sea, W, H, cell * cell, 25e6, async (s) => log(s));
+log(`model ${(performance.now() - t0).toFixed(0)} ms, cell ${cell.toFixed(0)} m`);
+// Catalonia mask
+const gj = await fetch('../data/catalonia.geojson').then((r) => r.json());
+const mc = document.createElement('canvas'); mc.width = W; mc.height = H; const mx = mc.getContext('2d');
+const lx = (lon) => (((lon + 180) / 360) * 2 ** Z - X0) * T, ly = (la) => { const r = (la * Math.PI) / 180; return (((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * 2 ** Z - Y0) * T; };
+mx.fillStyle = '#fff'; mx.beginPath();
+for (const poly of gj.features[0].geometry.coordinates) for (const ring of poly) ring.forEach(([a, b], k) => (k ? mx.lineTo(lx(a), ly(b)) : mx.moveTo(lx(a), ly(b))));
+mx.fill('evenodd');
+const mask = mx.getImageData(0, 0, W, H).data;
+const W2 = W / 2, H2 = H / 2, oc = document.createElement('canvas'); oc.width = W2; oc.height = H2;
+const ox = oc.getContext('2d'), out = ox.createImageData(W2, H2), o = out.data;
+for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) {
+  let hd = Infinity, sp = Infinity, inside = 0;
+  for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const i = (2 * y + dy) * W + 2 * x + dx;
+    if (sea[i]) continue;
+    if (mask[i * 4 + 3] > 127) inside = 1;
+    if (m.type[i] && m.hand[i] < hd) hd = m.hand[i];
+    if (m.spill[i] < sp) sp = m.spill[i];
+  }
+  const k = (y * W2 + x) * 4;
+  o[k] = Math.min(255, Math.round(hd * 10)); o[k + 1] = Math.min(255, Math.round(Math.max(0, sp) * 40)); o[k + 2] = inside ? 255 : 0; o[k + 3] = 255;
+}
+ox.putImageData(out, 0, 0);
+window.RESULT = oc.toDataURL('image/png');
+log('done ' + W2 + 'x' + H2);
+</script>
