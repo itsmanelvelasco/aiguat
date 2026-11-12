@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIGUAT · Catalonia Flood Lab</title>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="style.css" rel="stylesheet" />
+</head>
+<body>
+<div id="map"></div>
+
+<aside id="panel">
+  <header>
+    <div class="logo"><span class="drop"></span>AIGUAT</div>
+    <div class="tag">Catalonia Flood Lab</div>
+    <p class="sub">Click <b>anywhere</b> on the map to run a terrain-based flood model (HAND) on public elevation data, then push the water up.</p>
+  </header>
+
+  <section>
+    <h3>Hotspots</h3>
+    <div id="hotspots" class="chips"></div>
+    <div class="row small">
+      <label>Click resolution</label>
+      <div class="seg" id="res"><button data-z="13" class="on">Fine · 15 km</button><button data-z="12">Wide · 30 km</button></div>
+    </div>
+  </section>
+
+  <section>
+    <h3>Scenario <span id="areaName" class="muted"></span></h3>
+    <div class="slider">
+      <div class="lbl"><span>River stage above channel</span><b id="stageV">0.0 m</b></div>
+      <input type="range" id="stage" min="0" max="12" step="0.1" value="0" />
+    </div>
+    <div class="slider">
+      <div class="lbl"><span>Sea level / storm surge</span><b id="surgeV">0.0 m</b></div>
+      <input type="range" id="surge" min="0" max="5" step="0.05" value="0" />
+    </div>
+    <div class="chips" id="presets"></div>
+    <button id="animate" class="primary">▶ Simulate rising water</button>
+  </section>
+
+  <section>
+    <h3>Impact</h3>
+    <div class="stats">
+      <div><b id="sArea">–</b><span>km² flooded</span></div>
+      <div><b id="sPct">–</b><span>of area</span></div>
+      <div><b id="sMax">–</b><span>max depth</span></div>
+      <div><b id="sMean">–</b><span>mean depth</span></div>
+    </div>
+    <div class="chart" id="curve"></div>
+    <div class="cap">Flooded area vs river stage · dot = current scenario</div>
+  </section>
+
+  <section>
+    <h3>Validation · official SNCZI 100-yr zone</h3>
+    <div class="stats two">
+      <div><b id="vIoU">–</b><span>IoU (overlap)</span></div>
+      <div><b id="vRecall">–</b><span>official zone captured</span></div>
+    </div>
+    <button id="calib" class="ghost" disabled>⚙ Auto-calibrate to 100-yr flood</button>
+    <div class="cap" id="vNote">Model is compared cell-by-cell with the official MITECO/ACA T100 flood map.</div>
+  </section>
+
+  <section>
+    <h3>Live forecast <span class="muted">Open-Meteo · GloFAS</span></h3>
+    <div class="fc">
+      <div><div class="cap">Rain next 7 days (mm/day)</div><div class="chart sm" id="rain"></div></div>
+      <div><div class="cap">River discharge, −30 → +30 days (m³/s)</div><div class="chart sm" id="q"></div></div>
+    </div>
+    <div class="cap" id="fcNote">–</div>
+    <button id="applyFc" class="ghost" disabled>☔ Apply forecast scenario</button>
+  </section>
+
+  <section>
+    <h3>Layers</h3>
+    <div class="chips toggles" id="layers"></div>
+    <div class="slider">
+      <div class="lbl"><span>Terrain exaggeration</span><b id="exV">1.6×</b></div>
+      <input type="range" id="ex" min="1" max="4" step="0.1" value="1.6" />
+    </div>
+  </section>
+
+  <footer>
+    Elevation: Mapzen Terrarium (AWS Open Data) · Orthophoto: ICGC · Official flood zones: SNCZI / IDEE (MITECO, ACA) · Forecast: Open-Meteo, Copernicus GloFAS.<br/>
+    Indicative model for exploration — not for emergency decisions.
+  </footer>
+</aside>
+
+<div id="toast" class="hidden"><div class="spin"></div><span id="toastT"></span></div>
+<div id="legend">
+  <div class="cap">Water depth</div>
+  <div class="ramp"></div>
+  <div class="ticks"><span>0</span><span>1.5</span><span>3</span><span>4.5</span><span>6+ m</span></div>
+  <div class="off"><i></i>Official zone (when on)</div>
+</div>
+<div id="hint">Click the map to analyse any area</div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
