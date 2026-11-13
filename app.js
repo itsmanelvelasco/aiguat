@@ -1,5 +1,5 @@
-import { analyze, calibrate, handFor, RIVER } from './model.js?v=1794532208';
-import { initLocal, handleClick, scheduleLocal, showAddress, upstreamDams, liveStage } from './local.js?v=1794532208';
+import { analyze, calibrate, handFor, RIVER } from './model.js?v=1794532694';
+import { initLocal, handleClick, scheduleLocal, showAddress, upstreamDams, liveStage } from './local.js?v=1794532694';
 
 const R = 20037508.342789244;
 const WMS = 'https://servicios.idee.es/wms-inspire/riesgos-naturales/inundaciones';
@@ -172,19 +172,19 @@ let waterCanvas, waterCtx, waterImg;
 const mercXY = ([lon, lat]) => [(lon + 180) / 360, (1 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / Math.PI) / 2];
 maplibregl.addProtocol('aiguatwater', async ({ url }) => {
   const [z, x, y] = url.split('://')[1].split('?')[0].split('/').map(Number);
-  const c = new OffscreenCanvas(256, 256);
-  if (waterCanvas && st.area) {
+  const c = new OffscreenCanvas(256, 256), src = waterBmp || waterCanvas;
+  if (src && st.area) {
     const [ax0, ay0] = mercXY(st.area.coords[0]), [ax1, ay1] = mercXY(st.area.coords[2]), n = 2 ** z;
-    const kx = waterCanvas.width / (ax1 - ax0), ky = waterCanvas.height / (ay1 - ay0);
-    c.getContext('2d').drawImage(waterCanvas, (x / n - ax0) * kx, (y / n - ay0) * ky, kx / n, ky / n, 0, 0, 256, 256);
+    const kx = src.width / (ax1 - ax0), ky = src.height / (ay1 - ay0);
+    c.getContext('2d').drawImage(src, (x / n - ax0) * kx, (y / n - ay0) * ky, kx / n, ky / n, 0, 0, 256, 256);
   }
-  return { data: await (await c.convertToBlob()).arrayBuffer() };
+  return { data: c.transferToImageBitmap() };
 });
-let waterVer = 0;
+let waterVer = 0, waterBmp = null;
 function setupWater() {
   const { W, H, coords } = st.area;
   waterCanvas = document.createElement('canvas'); waterCanvas.width = W; waterCanvas.height = H;
-  waterCtx = waterCanvas.getContext('2d'); waterImg = waterCtx.createImageData(W, H);
+  waterCtx = waterCanvas.getContext('2d'); waterImg = waterCtx.createImageData(W, H); waterBmp = null;
   if (map.getLayer('water')) map.removeLayer('water');
   if (map.getSource('water')) map.removeSource('water');
   map.addSource('water', { type: 'raster', tiles: [`aiguatwater://{z}/{x}/{y}?v=${++waterVer}`], tileSize: 256, maxzoom: 17, bounds: [coords[0][0], coords[2][1], coords[2][0], coords[0][1]] });
@@ -202,10 +202,13 @@ function blobUpdate(src, canvas, coordinates) {
 let waterPending = false, waterLast = 0;
 function pushWater() {
   if (waterPending) return; waterPending = true;
-  setTimeout(() => {
-    waterPending = false; waterLast = performance.now();
+  setTimeout(async () => {
+    waterLast = performance.now();
+    const bmp = await createImageBitmap(waterCanvas), old = waterBmp;
+    waterBmp = bmp; waterPending = false;
     const sc = map.style.sourceCaches.water;
     if (sc) sc.reload();
+    if (old) setTimeout(() => old.close(), 2000);
   }, Math.max(0, 120 - (performance.now() - waterLast)));
 }
 
