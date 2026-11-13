@@ -1,5 +1,5 @@
-import { analyze, calibrate, handFor, RIVER } from './model.js?v=1794512140';
-import { initLocal, handleClick, scheduleLocal, showAddress, upstreamDams, liveStage } from './local.js?v=1794512140';
+import { analyze, calibrate, handFor, RIVER } from './model.js?v=1794532208';
+import { initLocal, handleClick, scheduleLocal, showAddress, upstreamDams, liveStage } from './local.js?v=1794532208';
 
 const R = 20037508.342789244;
 const WMS = 'https://servicios.idee.es/wms-inspire/riesgos-naturales/inundaciones';
@@ -167,24 +167,46 @@ const LUT = (() => {
 })();
 let waterCanvas, waterCtx, waterImg;
 
+// Water is served as generated raster tiles: an image source is only draped on terrain tiles inside
+// its own tile, so with 3D terrain the far part of the analysed box rendered without water.
+const mercXY = ([lon, lat]) => [(lon + 180) / 360, (1 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / Math.PI) / 2];
+maplibregl.addProtocol('aiguatwater', async ({ url }) => {
+  const [z, x, y] = url.split('://')[1].split('?')[0].split('/').map(Number);
+  const c = new OffscreenCanvas(256, 256);
+  if (waterCanvas && st.area) {
+    const [ax0, ay0] = mercXY(st.area.coords[0]), [ax1, ay1] = mercXY(st.area.coords[2]), n = 2 ** z;
+    const kx = waterCanvas.width / (ax1 - ax0), ky = waterCanvas.height / (ay1 - ay0);
+    c.getContext('2d').drawImage(waterCanvas, (x / n - ax0) * kx, (y / n - ay0) * ky, kx / n, ky / n, 0, 0, 256, 256);
+  }
+  return { data: await (await c.convertToBlob()).arrayBuffer() };
+});
+let waterVer = 0;
 function setupWater() {
   const { W, H, coords } = st.area;
   waterCanvas = document.createElement('canvas'); waterCanvas.width = W; waterCanvas.height = H;
   waterCtx = waterCanvas.getContext('2d'); waterImg = waterCtx.createImageData(W, H);
   if (map.getLayer('water')) map.removeLayer('water');
   if (map.getSource('water')) map.removeSource('water');
-  map.addSource('water', { type: 'image', url: waterCanvas.toDataURL(), coordinates: coords });
+  map.addSource('water', { type: 'raster', tiles: [`aiguatwater://{z}/{x}/{y}?v=${++waterVer}`], tileSize: 256, maxzoom: 17, bounds: [coords[0][0], coords[2][1], coords[2][0], coords[0][1]] });
   map.addLayer({ id: 'water', type: 'raster', source: 'water', paint: { 'raster-opacity': 0.92, 'raster-fade-duration': 0, 'raster-resampling': 'linear' } }, 'alerts-fill');
 }
 
-let waterPending = false;
+// Blob URLs instead of data URLs: no base64 encoding of multi-MB images on every slider move.
+function blobUpdate(src, canvas, coordinates) {
+  canvas.toBlob((b) => {
+    const url = URL.createObjectURL(b), old = src._blobUrl; src._blobUrl = url;
+    src.updateImage({ url, coordinates });
+    if (old) setTimeout(() => URL.revokeObjectURL(old), 3000);
+  });
+}
+let waterPending = false, waterLast = 0;
 function pushWater() {
   if (waterPending) return; waterPending = true;
-  requestAnimationFrame(() => {
-    waterPending = false;
-    const src = map.getSource('water');
-    if (src) src.updateImage({ url: waterCanvas.toDataURL(), coordinates: st.area.coords });
-  });
+  setTimeout(() => {
+    waterPending = false; waterLast = performance.now();
+    const sc = map.style.sourceCaches.water;
+    if (sc) sc.reload();
+  }, Math.max(0, 120 - (performance.now() - waterLast)));
 }
 
 function render() {
@@ -318,7 +340,7 @@ function renderCat() {
       if (d > 0.05) { n++; const l = Math.min(255, (d / 6) * 255) << 2; d8[o] = LUT[l]; d8[o + 1] = LUT[l + 1]; d8[o + 2] = LUT[l + 2]; d8[o + 3] = LUT[l + 3]; } else d8[o + 3] = 0;
     }
     cat.x.putImageData(img, 0, 0);
-    map.getSource('cat-water').updateImage({ url: cat.c.toDataURL(), coordinates: cat.coords });
+    blobUpdate(map.getSource('cat-water'), cat.c, cat.coords);
     $('catNote').innerHTML = cat.on ? `Catalonia-wide screening: <b>${((n * 228 * 228) / 1e6).toFixed(0)} km²</b> under water if every main river rose ${s.toFixed(1)} m${g ? ` and the sea ${g.toFixed(1)} m` : ''} (230 m grid).` : '';
   }, 120);
 }
