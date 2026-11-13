@@ -3,7 +3,9 @@
 **A 3D flood early-warning lab for Catalonia, built entirely on public data.**
 Click anywhere in Catalonia, push the river and the sea up, and see which streets, buildings and 250 m blocks go under water. Live ACA river gauges, reservoirs and forecasts set the scenario, and alerts are drafted below city level.
 
-![Storm Gloria replayed over the Ebre delta](docs/img/02-ebre-flood.jpg)
+[![AIGUAT showcase video (click to play)](docs/img/showcase-preview.gif)](docs/aiguat-showcase.mp4)
+
+▶ **[Watch the full showcase video (1 min 43 s)](docs/aiguat-showcase.mp4)**
 
 > Indicative, terrain-based model for exploration and planning. **Not for real emergency decisions.**
 
