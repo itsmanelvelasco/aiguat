@@ -1,5 +1,5 @@
-import { analyze, calibrate, handFor, RIVER } from './model.js?v=1794532694';
-import { initLocal, handleClick, scheduleLocal, showAddress, upstreamDams, liveStage } from './local.js?v=1794532694';
+import { analyze, calibrate, handFor, RIVER } from './model.js?v=1794536061';
+import { initLocal, handleClick, scheduleLocal, showAddress, upstreamDams, liveStage } from './local.js?v=1794536061';
 
 const R = 20037508.342789244;
 const WMS = 'https://servicios.idee.es/wms-inspire/riesgos-naturales/inundaciones';
@@ -188,7 +188,7 @@ function setupWater() {
   if (map.getLayer('water')) map.removeLayer('water');
   if (map.getSource('water')) map.removeSource('water');
   map.addSource('water', { type: 'raster', tiles: [`aiguatwater://{z}/{x}/{y}?v=${++waterVer}`], tileSize: 256, maxzoom: 17, bounds: [coords[0][0], coords[2][1], coords[2][0], coords[0][1]] });
-  map.addLayer({ id: 'water', type: 'raster', source: 'water', paint: { 'raster-opacity': 0.92, 'raster-fade-duration': 0, 'raster-resampling': 'linear' } }, 'alerts-fill');
+  map.addLayer({ id: 'water', type: 'raster', source: 'water', paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 14.5, 0.92, 16.5, 0.6], 'raster-fade-duration': 0, 'raster-resampling': 'linear' } }, 'alerts-fill');
 }
 
 // Blob URLs instead of data URLs: no base64 encoding of multi-MB images on every slider move.
@@ -416,9 +416,10 @@ async function loadForecast(spot) {
   $('fcNote').textContent = 'Loading forecast…'; $('applyFc').disabled = true;
   const [rlat, rlon] = spot.river || [spot.lat, spot.lon];
   const [rain, flood] = await Promise.all([
-    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${spot.lat}&longitude=${spot.lon}&daily=precipitation_sum&forecast_days=7&timezone=auto`).then((r) => r.json()),
-    fetch(`https://flood-api.open-meteo.com/v1/flood?latitude=${rlat}&longitude=${rlon}&daily=river_discharge,river_discharge_median,river_discharge_max&past_days=30&forecast_days=30`).then((r) => r.json()).catch(() => null),
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${spot.lat}&longitude=${spot.lon}&daily=precipitation_sum&forecast_days=7&timezone=auto`, { signal: AbortSignal.timeout(15000) }).then((r) => r.json()).catch(() => null),
+    fetch(`https://flood-api.open-meteo.com/v1/flood?latitude=${rlat}&longitude=${rlon}&daily=river_discharge,river_discharge_median,river_discharge_max&past_days=30&forecast_days=30`, { signal: AbortSignal.timeout(15000) }).then((r) => r.json()).catch(() => null),
   ]);
+  if (!rain || !rain.daily) { $('fcNote').textContent = 'Forecast unavailable right now (Open-Meteo did not respond).'; return; }
   const p = rain.daily.precipitation_sum.map((v) => v || 0), days = rain.daily.time;
   bars('rain', p, days);
   let qPeak = 0, qMed = 0, ratio = 1;
